@@ -44,8 +44,8 @@ exec ::
   State s a
   -> s
   -> s
-exec =
-  error "todo: Course.State#exec"
+exec (State f) s = snd (f s)
+
 
 -- | Run the `State` seeded with `s` and retrieve the resulting value.
 --
@@ -54,8 +54,7 @@ eval ::
   State s a
   -> s
   -> a
-eval =
-  error "todo: Course.State#eval"
+eval (State f) s = fst (f s)
 
 -- | A `State` where the state also distributes into the produced value.
 --
@@ -63,8 +62,7 @@ eval =
 -- (0,0)
 get ::
   State s s
-get =
-  error "todo: Course.State#get"
+get = State (\s -> (s, s))
 
 -- | A `State` where the resulting state is seeded with the given value.
 --
@@ -73,8 +71,7 @@ get =
 put ::
   s
   -> State s ()
-put =
-  error "todo: Course.State#put"
+put s = State (\_ -> ((), s))
 
 -- | Implement the `Functor` instance for `State s`.
 --
@@ -85,8 +82,16 @@ instance Functor (State s) where
     (a -> b)
     -> State s a
     -> State s b
-  (<$>) =
-    error "todo: Course.State#(<$>)"
+  (<$>) f initialState =
+    State (\incommingState ->
+      let (cv, cs) = runState initialState incommingState -- cv: computed value, cs: computed state
+      in  (f cv, cs)) -- f cv: apply the function to the computed value
+
+    -- -- run the initial state with the next state, storing the resultant value and state           
+    -- let   (resultantValue, resultantState) = runState initialState nextState 
+
+    -- -- use the function to transform the resultant value, returning the new value and state
+    -- in    (someFunction resultantValue, resultantState))                     
 
 -- | Implement the `Applicative` instance for `State s`.
 --
@@ -98,18 +103,28 @@ instance Functor (State s) where
 --
 -- >>> runState (State (\s -> ((+3), s ++ ("apple":.Nil))) <*> State (\s -> (7, s ++ ("banana":.Nil)))) Nil
 -- (10,["apple","banana"])
+
 instance Applicative (State s) where
   pure ::
     a
     -> State s a
-  pure =
-    error "todo: Course.State pure#instance (State s)"
+  pure a = State (\s -> (a, s))
   (<*>) ::
-    State s (a -> b)
-    -> State s a
-    -> State s b
-  (<*>) =
-    error "todo: Course.State (<*>)#instance (State s)"
+    State s (a -> b) -- this is a state where the value is a function
+    -> State s a     -- this is the initial state
+    -> State s b     -- this is the state resulting from unrwapping and applying the function to the initial state
+  (<*>) stateWithFunction initialState = 
+    
+    State (\incommingState ->
+
+    -- unwrap the function and the state by running the stateWithFunction with incomingState
+    let (unwrappedFunction, intermediateState) = runState stateWithFunction incommingState 
+
+    -- run the initialState with the intermediateState, storing the computed value and finalState
+        (computedValue, finalState) = runState initialState intermediateState
+
+    -- apply the unwrapped function to the computed value
+    in  (unwrappedFunction computedValue, finalState))
 
 -- | Implement the `Monad` instance for `State s`.
 --
@@ -123,11 +138,20 @@ instance Applicative (State s) where
 -- (10,16)
 instance Monad (State s) where
   (=<<) ::
-    (a -> State s b)
-    -> State s a
-    -> State s b
-  (=<<) =
-    error "todo: Course.State (=<<)#instance (State s)"
+    (a -> State s b) -- this is a function that takes a value and returns a state
+    -> State s a     -- this is the initial state
+    -> State s b     -- this is the state resulting from unrwapping and applying the function to the initial state
+  (=<<) functionWithState initialState =
+    State (\incomingState ->
+
+      -- destructure the initial state by running it with the incoming state
+      let (computedValue, intermediateState) = runState initialState incomingState
+
+      -- apply the function(a -> State s b) to the computed value, returning the new state
+          newState = functionWithState computedValue
+
+      -- run the new state with the intermediate state returning the final value and state
+      in runState newState intermediateState)
 
 -- | Find the first element in a `List` that satisfies a given predicate.
 -- It is possible that no element is found, hence an `Optional` result.
@@ -148,8 +172,13 @@ findM ::
   (a -> f Bool)
   -> List a
   -> f (Optional a)
-findM =
-  error "todo: Course.State#findM"
+findM monadicPredicate list = 
+  foldRight 
+  (\a b -> 
+    (\x -> if x 
+      then pure (Full a) 
+      else b) =<< monadicPredicate a) 
+  (pure Empty) list
 
 -- | Find the first element in a `List` that repeats.
 -- It is possible that no element repeats, hence an `Optional` result.
@@ -165,8 +194,8 @@ firstRepeat ::
   Ord a =>
   List a
   -> Optional a
-firstRepeat =
-  error "todo: Course.State#firstRepeat"
+firstRepeat list = 
+  eval (findM (\a -> State (\s -> (S.member a s, S.insert a s))) list) S.empty
 
 -- | Remove all duplicate elements in a `List`.
 -- /Tip:/ Use `filtering` and `State` with a @Data.Set#Set@.
@@ -178,8 +207,8 @@ distinct ::
   Ord a =>
   List a
   -> List a
-distinct =
-  error "todo: Course.State#distinct"
+distinct list = 
+  eval (filtering (\a -> State (\s -> (not $ S.member a s, S.insert a s))) list) S.empty
 
 -- | A happy number is a positive integer, where the sum of the square of its digits eventually reaches 1 after repetition.
 -- In contrast, a sad number (not a happy number) is where the sum of the square of its digits never reaches 1
@@ -205,5 +234,6 @@ distinct =
 isHappy ::
   Integer
   -> Bool
-isHappy =
-  error "todo: Course.State#isHappy"
+isHappy n = 
+  contains 1 $ firstRepeat $ produce (toInteger . sum . map (join (*) . digitToInt) . listh . show') n
+  where show' = show . toInteger
